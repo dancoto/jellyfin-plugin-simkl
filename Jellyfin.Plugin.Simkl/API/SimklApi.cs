@@ -1,4 +1,5 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
 using System.Diagnostics.Tracing;
 using System.IO;
 using System.Net.Http;
@@ -7,6 +8,7 @@ using System.Net.Http.Json;
 using System.Net.Mime;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
 using Jellyfin.Extensions.Json;
@@ -117,6 +119,30 @@ namespace Jellyfin.Plugin.Simkl.API
         /// <returns>Status.</returns>
         public async Task<(bool Success, BaseItemDto Item)> MarkAsWatched(BaseItemDto item, string userToken)
         {
+            string? shokoEpisodeId = null;
+            foreach (var (key, value) in item.ProviderIds)
+            {
+                if (key.Equals("Shoko Episode", StringComparison.OrdinalIgnoreCase))
+                {
+                    shokoEpisodeId = value;
+                    break;
+                }
+            }
+
+            if (!string.IsNullOrEmpty(shokoEpisodeId))
+            {
+                _logger.LogInformation("Found Shoko Episode ID {ShokoEpisodeId}. Querying local Shoko server.", shokoEpisodeId);
+                var shokoHistory = await CreateHistoryFromShokoEpisodeAsync(item, shokoEpisodeId).ConfigureAwait(false);
+                if (shokoHistory != null)
+                {
+                    var response = await SyncHistoryAsync(shokoHistory, userToken).ConfigureAwait(false);
+                    if (response != null && (shokoHistory.Movies.Count == response.Added.Movies || shokoHistory.Shows.Count == response.Added.Shows))
+                    {
+                        return (true, item);
+                    }
+                }
+            }
+
             var history = CreateHistoryFromItem(item);
             var r = await SyncHistoryAsync(history, userToken);
             _logger.LogDebug("BaseItem: {@Item}", item);
@@ -305,6 +331,90 @@ namespace Jellyfin.Plugin.Simkl.API
                 .SendAsync(options);
 
             return await responseMessage.Content.ReadFromJsonAsync<T1>(_caseInsensitiveJsonSerializerOptions);
+        }
+
+        private async Task<SimklHistory?> CreateHistoryFromShokoEpisodeAsync(BaseItemDto item, string shokoEpisodeId)
+        {
+            var shokoUrl = Environment.GetEnvironmentVariable("SHOKO_URL") ?? "http://10.0.0.132:8111";
+            var shokoToken = Environment.GetEnvironmentVariable("SHOKO_TOKEN");
+
+            var url = $"{shokoUrl.TrimEnd('/')}/api/v3/Episode/{shokoEpisodeId}?includeDataFrom=AniDB";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(shokoToken))
+            {
+                request.Headers.TryAddWithoutValidation("apiKey", shokoToken);
+            }
+
+            try
+            {
+                using var client = _httpClientFactory.CreateClient();
+                using var response = await client.SendAsync(request).ConfigureAwait(false);
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogError("Local Shoko Server lookup failed with status code: {StatusCode}", response.StatusCode);
+                    return null;
+                }
+
+                var shokoData = await response.Content.ReadFromJsonAsync<ShokoEpisodeResponse>(_caseInsensitiveJsonSerializerOptions).ConfigureAwait(false);
+                if (shokoData == null || shokoData.AniDB.AnimeID == 0)
+                {
+                    _logger.LogError("Failed parsing AniDB Series ID out of Shoko response.");
+                    return null;
+                }
+
+                var history = new SimklHistory();
+                var isMovie = shokoData.IDs.TMDB.Movie.Length == 1;
+
+                if (isMovie)
+                {
+                    var simklMovie = new SimklMovie
+                    {
+                        Title = item.Name ?? item.OriginalTitle,
+                        Year = item.ProductionYear,
+                        Ids = new SimklMovieIds(new Dictionary<string, string>())
+                        {
+                            Anidb = shokoData.AniDB.AnimeID
+                        },
+                        WatchedAt = DateTime.UtcNow
+                    };
+                    history.Movies.Add(simklMovie);
+                }
+                else
+                {
+                    var seasonNumber = string.Equals(shokoData.AniDB.Type, "Special", StringComparison.OrdinalIgnoreCase) ? 0 : 1;
+                    var simklShow = new SimklShow
+                    {
+                        Title = item.SeriesName,
+                        Year = item.ProductionYear,
+                        Ids = new SimklShowIds(new Dictionary<string, string>())
+                        {
+                            Anidb = shokoData.AniDB.AnimeID
+                        },
+                        Seasons = new[]
+                        {
+                            new Season
+                            {
+                                Number = seasonNumber,
+                                Episodes = new[]
+                                {
+                                    new ShowEpisode
+                                    {
+                                        Number = shokoData.AniDB.EpisodeNumber
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    history.Shows.Add(simklShow);
+                }
+
+                return history;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error fetching metadata from Shoko Server.");
+                return null;
+            }
         }
     }
 }
