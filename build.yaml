@@ -13,6 +13,7 @@ category: "General"
 artifacts:
   - "Jellyfin.Plugin.Simkl.dll"
 changelog: |-
+  - Add local Shoko Server lookup integration for AniDB episode scrobbling
   - Fix invalid operation exception (#59) @balciseri
   - Revert "Update dependency Microsoft.Extensions.Http to v10" (#54) @Shadowghost
 
