@@ -12,7 +12,7 @@
             "changelog": "- Add local Shoko Server lookup integration for AniDB episode scrobbling",
             "targetAbi": "10.11.7.0",
             "sourceUrl": "https://github.com/dancoto/jellyfin-plugin-simkl/releases/download/8.0.0.1/simkl_8.0.0.1.zip",
-            "checksum": "210f09fe36c81fb1cd6ad1d4b0a446ef",
+            "checksum": "c3d91f064c121188021bcdb43bf044253dc8252c72377aefcb4701770093ad5a",
             "timestamp": "2026-06-02T22:42:00Z"
           }
         ]
