@@ -339,7 +339,6 @@ namespace Jellyfin.Plugin.Simkl.API
             var shokoToken = Environment.GetEnvironmentVariable("SHOKO_TOKEN");
 
             var url = $"{shokoUrl.TrimEnd('/')}/api/v3/Episode/{shokoEpisodeId}?includeDataFrom=AniDB";
-            
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             if (!string.IsNullOrEmpty(shokoToken))
             {
@@ -350,7 +349,6 @@ namespace Jellyfin.Plugin.Simkl.API
             {
                 using var client = _httpClientFactory.CreateClient();
                 using var response = await client.SendAsync(request).ConfigureAwait(false);
-                
                 if (!response.IsSuccessStatusCode)
                 {
                     _logger.LogError("Local Shoko Server lookup failed with status code: {StatusCode}", response.StatusCode);
